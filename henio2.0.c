@@ -2,15 +2,16 @@
 #include <util/delay.h>
 #include <avr/interrupt.h>
 
-#define SPI_DDR  DDRB
-#define SPI_CS   PINB2 //-> D10
-#define SPI_MOSI PINB3 //-> D11
-#define SPI_SCK  PINB5 //-> D13
-
 #define LEDRING_COUNT 24
+#define ENCODER_RANGE LEDRING_COUNT
 
 #define spi_transfer(data) \
     do {SPDR=data; while(!(SPSR&(1<<SPIF)));} while(0)
+
+struct ledring_data {
+    uint8_t ledcount;
+    uint8_t fx_last_n;
+} leds;
 
 typedef struct _pix {
     uint8_t R;
@@ -19,7 +20,7 @@ typedef struct _pix {
 } pix;
 
 void ledring_send_byte(uint8_t b) {
-    for (int i = 0; i<8; i++) {
+    for (uint8_t i = 0; i<8; i++) {
         if (b & 0x80)
             spi_transfer(0b11111100);
         else
@@ -36,50 +37,113 @@ void ledring_set_pix(pix* px)
     ledring_send_byte(px->B);
 }
 
-void ledring_show()
+void ledring_show(void)
 {
     _delay_us(10);
 }
 
-void ledring_init(void)
+void ledring_blank(struct ledring_data *d)
+{
+    pix black = {0, 0, 0};
+    _delay_us(20);
+    for (int i = 0; i<(d->ledcount); i++) {
+        ledring_set_pix(&black);
+    }
+    _delay_us(50);
+}
+
+void ledring_init(struct ledring_data *d, uint8_t count)
 {
     DDRB |= _BV(PINB2) | _BV(PINB3) | _BV(PINB5);
     SPCR = _BV(SPE) | _BV(MSTR) | _BV(CPHA);
     SPSR |= _BV(SPI2X);
     PORTB |= _BV(PINB2);
 
-    pix black = {0, 0, 0};
-    _delay_us(20);
-    for (int i = 0; i<LEDRING_COUNT; i++) {
-        ledring_set_pix(&black);
-    }
-    _delay_us(50);
+    d->ledcount = count;
+    d->fx_last_n = 0xFF;
+
+    ledring_blank(d);
 }
 
-void ledring_fx_single(int n, pix *P_on)
+void ledring_fx_single(struct ledring_data *d, int n, pix *P_on)
 {
+    if (n == d->fx_last_n) return;
     pix P_off = { 0, 0, 1 };
-    n = n%LEDRING_COUNT;
+
     cli();
-    for (int i = 0; i<LEDRING_COUNT; i++) {
+    for (int i = 0; i<(d->ledcount); i++) {
         if ( i == n )
             ledring_set_pix(P_on);
         else
             ledring_set_pix(&P_off);
     }
-    ledring_show();
     sei();
+    ledring_show();
+
+    d->fx_last_n = n;
+}
+
+struct enc_data {
+    uint8_t is; // current status (in grey code)
+    uint8_t was; // last status
+    int8_t count; // counter state
+    uint8_t count_range; // max counter val
+} enc;
+
+#define enc_rd() (~(PIND>>2) & 0x3)
+
+void enc_init(struct enc_data *d, uint8_t range)
+{
+    DDRD &= ~(_BV(PIND2) | _BV(PIND3));
+    PORTD |=  _BV(PIND2) | _BV(PIND3);
+
+    d->was = enc_rd();
+    d->is = d->was;
+    d->count = 0;
+    d->count_range = range;
+}
+
+void enc_update(struct enc_data *d)
+{
+    d->is = enc_rd();
+
+    if (d->is != d->was) {
+        if ((d->was==0 && d->is==2) ||
+            (d->was==3 && d->is==1)) {
+//              .--.
+//          A __|  |___
+//               .--.
+//          B ___|  |__
+//       CODE *02**31**
+            d->count++;
+            if (d->count >= d->count_range) d->count = 0;
+        } else
+        if ((d->was==1 && d->is==3) ||
+            (d->was==2 && d->is==0)) {
+//               .--.
+//          A ___|  |__
+//              .--.
+//          B __|  |___
+//       CODE **13*20**
+            d->count--;
+            if (d->count < 0) d->count = (d->count_range-1);
+        }
+
+        d->was = d->is;
+    }
 }
 
 int main(void)
 {
-    ledring_init();
+    ledring_init(&leds, LEDRING_COUNT);
+    enc_init(&enc, ENCODER_RANGE);
 
     pix P_on = { 16, 0, 92 };
-    int l = 0;
     while (1) {
-        ledring_fx_single(l++, &P_on);
-        _delay_ms(10);
-    }
+        ledring_fx_single(&leds, enc.count, &P_on);
+        _delay_ms(2);
 
+        enc_update(&enc);
+
+    }
 }
