@@ -90,7 +90,7 @@ struct enc_data {
     uint8_t count_range; // max counter val
 } enc;
 
-#define enc_rd() (~(PIND>>2) & 0x3)
+#define enc_rd() ((PIND>>2) & 0x3)
 
 void enc_init(struct enc_data *d, uint8_t range)
 {
@@ -105,28 +105,34 @@ void enc_init(struct enc_data *d, uint8_t range)
 
 void enc_update(struct enc_data *d)
 {
-    d->is = enc_rd();
+    d->is = enc_rd(); // A/B logic is inverted
 
     if (d->is != d->was) {
-        if ((d->was==0 && d->is==2) ||
-            (d->was==3 && d->is==1)) {
-//              .--.
-//          A __|  |___
-//               .--.
-//          B ___|  |__
-//       CODE *02**31**
-            d->count++;
-            if (d->count >= d->count_range) d->count = 0;
-        } else
-        if ((d->was==1 && d->is==3) ||
-            (d->was==2 && d->is==0)) {
-//               .--.
-//          A ___|  |__
-//              .--.
-//          B __|  |___
-//       CODE **13*20**
+        if ((d->was==3 && d->is==2) ||
+            (d->was==1 && d->is==3)) {
+//            __    ___
+//         A    |  |
+//              '--'
+//            ___    __
+//         B     |  |
+//               '--'
+//      CODE  *3200133*
+//              ^   ^
             d->count--;
             if (d->count < 0) d->count = (d->count_range-1);
+        } else
+        if ((d->was==3 && d->is==1) ||
+            (d->was==2 && d->is==3)) {
+//            ___    __
+//         A     |  |
+//               '--'
+//            __    ___
+//         B    |  |
+//              '--'
+//      CODE  *3100233*
+//              ^   ^
+            d->count++;
+            if (d->count >= d->count_range) d->count = 0;
         }
 
         d->was = d->is;
