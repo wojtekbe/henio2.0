@@ -111,7 +111,7 @@ void ledring_fx_frame(struct ledring_data *d, void* f)
 }
 
 struct enc_data {
-    uint8_t is; // current status (in grey code)
+    uint8_t is; // current status (in gray code)
     uint8_t was; // last status
     int8_t count; // counter state
     uint8_t count_range; // max counter val
