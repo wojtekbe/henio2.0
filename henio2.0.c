@@ -11,6 +11,7 @@
 struct ledring_data {
     uint8_t ledcount;
     uint8_t fx_last_n;
+    uint8_t fx_style_idx;
 } leds;
 
 typedef struct _pix {
@@ -61,21 +62,30 @@ void ledring_init(struct ledring_data *d, uint8_t count)
 
     d->ledcount = count;
     d->fx_last_n = 0xFF;
+    d->fx_style_idx = 0;
 
     ledring_blank(d);
 }
 
-void ledring_fx_single(struct ledring_data *d, int n, pix *P_on)
+struct style {pix bg; pix fg;};
+struct style themes[] = {
+    { {0, 0, 1}, {16, 0, 92} },
+    { {1, 0, 0}, {92, 0, 16} },
+    { {0, 1, 0}, {92, 0, 16} }
+};
+#define NUM_STYLES (sizeof(themes) / sizeof(struct style))
+
+void ledring_fx_single(struct ledring_data *d, int n, uint8_t next)
 {
-    if (n == d->fx_last_n) return;
-    pix P_off = { 0, 0, 1 };
+    //if (n == d->fx_last_n) return;
+    if (next) d->fx_style_idx = (d->fx_style_idx+1)%NUM_STYLES;
 
     cli();
     for (int i = 0; i<(d->ledcount); i++) {
         if ( i == n )
-            ledring_set_pix(P_on);
+            ledring_set_pix(&themes[d->fx_style_idx].fg);
         else
-            ledring_set_pix(&P_off);
+            ledring_set_pix(&themes[d->fx_style_idx].bg);
     }
     sei();
     ledring_show();
@@ -86,19 +96,22 @@ void ledring_fx_single(struct ledring_data *d, int n, pix *P_on)
 struct enc_data {
     uint8_t is; // current status (in grey code)
     uint8_t was; // last status
+    uint8_t btn; // button state
     int8_t count; // counter state
     uint8_t count_range; // max counter val
 } enc;
 
-#define enc_rd() ((PIND>>2) & 0x3)
+#define enc_rd()     ((PIND>>2) & 0x3)
+#define enc_rd_btn() (~(PIND>>4) & 0x1)
 
 void enc_init(struct enc_data *d, uint8_t range)
 {
-    DDRD &= ~(_BV(PIND2) | _BV(PIND3));
-    PORTD |=  _BV(PIND2) | _BV(PIND3);
+    DDRD &= ~(_BV(PIND2) | _BV(PIND3) | _BV(PIND4));
+    PORTD |=  _BV(PIND2) | _BV(PIND3) | _BV(PIND4);
 
     d->was = enc_rd();
     d->is = d->was;
+    d->btn = 0;
     d->count = 0;
     d->count_range = range;
 }
@@ -107,6 +120,7 @@ void enc_update(struct enc_data *d)
 {
     d->is = enc_rd(); // A/B logic is inverted
 
+    // rotary position
     if (d->is != d->was) {
         if ((d->was==3 && d->is==2) ||
             (d->was==1 && d->is==3)) {
@@ -137,6 +151,15 @@ void enc_update(struct enc_data *d)
 
         d->was = d->is;
     }
+
+    // button
+    if (d->btn==0 && enc_rd_btn()==1) { // btn down
+        d->btn = 1;
+    } else
+    if ((d->btn==1 && enc_rd_btn()==0) ||
+        (d->btn == enc_rd_btn())) { // btn up
+        d->btn = 0;
+    }
 }
 
 int main(void)
@@ -144,12 +167,10 @@ int main(void)
     ledring_init(&leds, LEDRING_COUNT);
     enc_init(&enc, ENCODER_RANGE);
 
-    pix P_on = { 16, 0, 92 };
     while (1) {
-        ledring_fx_single(&leds, enc.count, &P_on);
-        _delay_ms(2);
-
         enc_update(&enc);
 
+        ledring_fx_single(&leds, enc.count, enc.btn);
+        _delay_ms(2);
     }
 }
