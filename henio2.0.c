@@ -11,6 +11,7 @@
 struct ledring_data {
     uint8_t ledcount;
     uint8_t fx_last_n;
+    void (*redraw)(struct ledring_data*, void*);
 } leds;
 
 typedef struct _pix {
@@ -52,7 +53,7 @@ void ledring_blank(struct ledring_data *d)
     _delay_us(50);
 }
 
-void ledring_init(struct ledring_data *d, uint8_t count)
+void ledring_init(struct ledring_data *d, uint8_t count, void (*f)(struct ledring_data*, void*))
 {
     DDRB |= _BV(PINB2) | _BV(PINB3) | _BV(PINB5);
     SPCR = _BV(SPE) | _BV(MSTR) | _BV(CPHA);
@@ -61,19 +62,22 @@ void ledring_init(struct ledring_data *d, uint8_t count)
 
     d->ledcount = count;
     d->fx_last_n = 0xFF;
+    d->redraw = f;
 
     ledring_blank(d);
 }
 
-void ledring_fx_single(struct ledring_data *d, int n, pix *P_on)
+void ledring_fx_single(struct ledring_data *d, void* p)
 {
+    int8_t n = *((int8_t*)p);
     if (n == d->fx_last_n) return;
     pix P_off = { 0, 0, 1 };
+    pix P_on  = { 5, 5, 5 };
 
     cli();
     for (int i = 0; i<(d->ledcount); i++) {
         if ( i == n )
-            ledring_set_pix(P_on);
+            ledring_set_pix(&P_on);
         else
             ledring_set_pix(&P_off);
     }
@@ -81,6 +85,29 @@ void ledring_fx_single(struct ledring_data *d, int n, pix *P_on)
     ledring_show();
 
     d->fx_last_n = n;
+}
+
+// nice & predefined colors
+#define GREEN  {0,   79,  5}
+#define YELLOW {134, 136, 0}
+#define ORANGE {136, 101, 0}
+#define RED    {206, 34,  11}
+#define PINK   {136, 0,   122}
+#define VIOLET {86,  0,   136}
+#define BLUE   {2,   0,   136}
+#define LBLUE  {0,   114, 136}
+
+
+void ledring_fx_frame(struct ledring_data *d, void* f)
+{
+    pix *frame = (pix *)f;
+
+    cli();
+    for (int i = 0; i<(d->ledcount); i++) {
+        ledring_set_pix(&frame[i]);
+    }
+    sei();
+    ledring_show();
 }
 
 struct enc_data {
@@ -139,17 +166,22 @@ void enc_update(struct enc_data *d)
     }
 }
 
+pix frame[24] = {
+    GREEN,  YELLOW, ORANGE, RED,    LBLUE, BLUE,  VIOLET, PINK,
+    GREEN,  RED,    LBLUE,  ORANGE, PINK,  LBLUE, BLUE,   VIOLET,
+    ORANGE, PINK,   ORANGE, VIOLET, RED,   RED,   VIOLET, PINK
+};
+
 int main(void)
 {
-    ledring_init(&leds, LEDRING_COUNT);
+    ledring_init(&leds, LEDRING_COUNT, ledring_fx_frame);
     enc_init(&enc, ENCODER_RANGE);
 
-    pix P_on = { 16, 0, 92 };
     while (1) {
-        ledring_fx_single(&leds, enc.count, &P_on);
+        enc_update(&enc);
         _delay_ms(2);
 
-        enc_update(&enc);
-
+        //leds.redraw(&leds, (void*)&(enc.count));
+        leds.redraw(&leds, (void*)frame);
     }
 }
