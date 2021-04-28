@@ -1,5 +1,5 @@
 BIN=henio2.0
-OBJS=henio2.0.o
+OBJS=henio2.0.o fast_hsv2rgb_8bit.o
 
 CC=avr-gcc
 OBJCOPY=avr-objcopy

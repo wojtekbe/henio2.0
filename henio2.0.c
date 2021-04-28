@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
+#include "fast_hsv2rgb.h"
 
 #define LEDRING_COUNT 24
 #define ENCODER_RANGE LEDRING_COUNT
@@ -10,8 +11,10 @@
 
 struct ledring_data {
     uint8_t ledcount;
-    uint8_t fx_last_n;
     void (*redraw)(struct ledring_data*, void*);
+
+    uint8_t fx_last_n;
+    uint8_t fx_hsv_count;
 } leds;
 
 typedef struct _pix {
@@ -61,8 +64,10 @@ void ledring_init(struct ledring_data *d, uint8_t count, void (*f)(struct ledrin
     PORTB |= _BV(PINB2);
 
     d->ledcount = count;
-    d->fx_last_n = 0xFF;
     d->redraw = f;
+
+    d->fx_last_n = 0xFF;
+    d->fx_hsv_count = 0;
 
     ledring_blank(d);
 }
@@ -116,6 +121,35 @@ struct enc_data {
     int8_t count; // counter state
     uint8_t count_range; // max counter val
 } enc;
+
+void hsv2rgb(uint16_t h, uint8_t s, uint8_t v, pix *P)
+{
+    return fast_hsv2rgb_8bit(h, s, v, &(P->R), &(P->G), &(P->B));
+}
+
+#define FX_UNICORN_V_ON  127
+#define FX_UNICORN_V_OFF   4
+#define FX_UNICORN_S     250
+void ledring_fx_unicorn(struct ledring_data *d, void *a) //🦄
+{
+    pix P;
+    uint16_t h;
+    uint8_t v;
+
+    cli();
+    for (int i = 0; i<(d->ledcount); i++) {
+        h = i*HSV_HUE_STEPS/23;
+        if (i == d->fx_hsv_count)
+            v = FX_UNICORN_V_ON;
+        else
+            v = FX_UNICORN_V_OFF;
+
+        hsv2rgb(h, FX_UNICORN_S, v, &P);
+        ledring_set_pix(&P);
+    }
+    sei();
+    ledring_show();
+}
 
 #define enc_rd() ((PIND>>2) & 0x3)
 
@@ -174,14 +208,15 @@ pix frame[24] = {
 
 int main(void)
 {
-    ledring_init(&leds, LEDRING_COUNT, ledring_fx_frame);
-    enc_init(&enc, ENCODER_RANGE);
+    ledring_init(&leds, LEDRING_COUNT, ledring_fx_unicorn); // 🚦
+    enc_init(&enc, ENCODER_RANGE); // 🌀
 
     while (1) {
         enc_update(&enc);
+        leds.fx_hsv_count = enc.count;
         _delay_ms(2);
 
         //leds.redraw(&leds, (void*)&(enc.count));
-        leds.redraw(&leds, (void*)frame);
+        leds.redraw(&leds, 0);
     }
 }
