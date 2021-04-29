@@ -6,6 +6,11 @@
 #define LEDRING_COUNT 24
 #define ENCODER_RANGE LEDRING_COUNT
 
+#define FX_UNICORN_V_ON  128
+#define FX_UNICORN_V_OFF   4
+#define FX_UNICORN_S     250
+#define FX_UNICORN_V_FADEOUT_STEP 2
+
 #define spi_transfer(data) \
     do {SPDR=data; while(!(SPSR&(1<<SPIF)));} while(0)
 
@@ -22,6 +27,14 @@ typedef struct _pix {
     uint8_t G;
     uint8_t B;
 } pix;
+
+typedef struct _pix_hsv {
+    uint16_t H;
+    uint8_t  S;
+    uint8_t  V;
+} pix_hsv;
+
+pix_hsv frame_hsv[LEDRING_COUNT];
 
 void ledring_send_byte(uint8_t b) {
     for (uint8_t i = 0; i<8; i++) {
@@ -66,8 +79,14 @@ void ledring_init(struct ledring_data *d, uint8_t count, void (*f)(struct ledrin
     d->ledcount = count;
     d->redraw = f;
 
+    /* fx init */
     d->fx_last_n = 0xFF;
     d->fx_hsv_count = 0;
+    for (int i = 0; i<(d->ledcount); i++) {
+        frame_hsv[i].H = i*HSV_HUE_STEPS/23;
+        frame_hsv[i].S = FX_UNICORN_S;
+        frame_hsv[i].V = FX_UNICORN_V_OFF;
+    }
 
     ledring_blank(d);
 }
@@ -122,29 +141,31 @@ struct enc_data {
     uint8_t count_range; // max counter val
 } enc;
 
-void hsv2rgb(uint16_t h, uint8_t s, uint8_t v, pix *P)
+void hsv2rgb(pix_hsv *Phsv, pix *P)
 {
-    return fast_hsv2rgb_8bit(h, s, v, &(P->R), &(P->G), &(P->B));
+    return fast_hsv2rgb_8bit(Phsv->H, Phsv->S, Phsv->V,
+                             &(P->R), &(P->G), &(P->B));
 }
 
-#define FX_UNICORN_V_ON  127
-#define FX_UNICORN_V_OFF   4
-#define FX_UNICORN_S     250
 void ledring_fx_unicorn(struct ledring_data *d, void *a) //🦄
 {
     pix P;
     uint16_t h;
     uint8_t v;
 
+    /* fade out all 'old' pixels */
+    for (int i = 0; i<(d->ledcount); i++) {
+        if (frame_hsv[i].V > FX_UNICORN_V_OFF)
+            frame_hsv[i].V -= FX_UNICORN_V_FADEOUT_STEP;
+    }
+
+    /* light the 'new' pixel */
+    frame_hsv[ d->fx_hsv_count ].V = FX_UNICORN_V_ON;
+
+    /* render frame */
     cli();
     for (int i = 0; i<(d->ledcount); i++) {
-        h = i*HSV_HUE_STEPS/23;
-        if (i == d->fx_hsv_count)
-            v = FX_UNICORN_V_ON;
-        else
-            v = FX_UNICORN_V_OFF;
-
-        hsv2rgb(h, FX_UNICORN_S, v, &P);
+        hsv2rgb(&frame_hsv[i], &P);
         ledring_set_pix(&P);
     }
     sei();
