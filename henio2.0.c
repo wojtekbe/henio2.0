@@ -4,7 +4,6 @@
 #include "fast_hsv2rgb.h"
 
 #define LEDRING_COUNT 24
-#define ENCODER_RANGE LEDRING_COUNT
 
 #define FX_UNICORN_V_ON  128
 #define FX_UNICORN_V_OFF   4
@@ -121,24 +120,13 @@ void ledring_fx_single(struct ledring_data *d, void* p)
 #define BLUE   {2,   0,   136}
 #define LBLUE  {0,   114, 136}
 
-
-void ledring_fx_frame(struct ledring_data *d, void* f)
-{
-    pix *frame = (pix *)f;
-
-    cli();
-    for (int i = 0; i<(d->ledcount); i++) {
-        ledring_set_pix(&frame[i]);
-    }
-    sei();
-    ledring_show();
-}
-
 struct enc_data {
     uint8_t is; // current status (in gray code)
     uint8_t was; // last status
     int8_t count; // counter state
-    uint8_t count_range; // max counter val
+    uint8_t maxcount; // max counter val
+
+    void (*on_change)(uint8_t*);
 } enc;
 
 void hsv2rgb(pix_hsv *Phsv, pix *P)
@@ -174,7 +162,7 @@ void ledring_fx_unicorn(struct ledring_data *d, void *a) //🦄
 
 #define enc_rd() ((PIND>>2) & 0x3)
 
-void enc_init(struct enc_data *d, uint8_t range)
+void enc_init(struct enc_data *d, uint8_t range, void (*f)(uint8_t*))
 {
     DDRD &= ~(_BV(PIND2) | _BV(PIND3));
     PORTD |=  _BV(PIND2) | _BV(PIND3);
@@ -182,7 +170,9 @@ void enc_init(struct enc_data *d, uint8_t range)
     d->was = enc_rd();
     d->is = d->was;
     d->count = 0;
-    d->count_range = range;
+    d->maxcount = range;
+
+    d->on_change = f;
 }
 
 void enc_update(struct enc_data *d)
@@ -201,7 +191,8 @@ void enc_update(struct enc_data *d)
 //      CODE  *3200133*
 //              ^   ^
             d->count--;
-            if (d->count < 0) d->count = (d->count_range-1);
+            if (d->count < 0) d->count = (d->maxcount-1);
+            d->on_change(&(d->count));
         } else
         if ((d->was==3 && d->is==1) ||
             (d->was==2 && d->is==3)) {
@@ -214,27 +205,26 @@ void enc_update(struct enc_data *d)
 //      CODE  *3100233*
 //              ^   ^
             d->count++;
-            if (d->count >= d->count_range) d->count = 0;
+            if (d->count >= d->maxcount) d->count = 0;
+            d->on_change(&(d->count));
         }
 
         d->was = d->is;
     }
 }
 
-pix frame[24] = {
-    GREEN,  YELLOW, ORANGE, RED,    LBLUE, BLUE,  VIOLET, PINK,
-    GREEN,  RED,    LBLUE,  ORANGE, PINK,  LBLUE, BLUE,   VIOLET,
-    ORANGE, PINK,   ORANGE, VIOLET, RED,   RED,   VIOLET, PINK
-};
+void on_enc_change(uint8_t *cnt)
+{
+    leds.fx_hsv_count = *cnt;
+}
 
 int main(void)
 {
     ledring_init(&leds, LEDRING_COUNT, ledring_fx_unicorn); // 🚦
-    enc_init(&enc, ENCODER_RANGE); // 🌀
+    enc_init(&enc, LEDRING_COUNT, on_enc_change); // 🌀
 
     while (1) {
         enc_update(&enc);
-        leds.fx_hsv_count = enc.count;
         _delay_ms(2);
 
         //leds.redraw(&leds, (void*)&(enc.count));
