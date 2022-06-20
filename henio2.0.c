@@ -3,6 +3,21 @@
 #include <avr/interrupt.h>
 #include "fast_hsv2rgb.h"
 
+/*
+  ,---------,
+  |         |    MOSI    ,------,
+  | D11,PB2 o------------o DATA |
+  |         |     ,----, '------'
+  | D2, PD2 o-----o A  | LEDring
+  |         |     |    |
+  | D3, PD3 o-----o B  |
+  |         |     |    |
+  | D4, PD4 o-----o SW |
+  |         |     '----'
+  '---------'    encoder
+   atmega328
+*/
+
 #define LEDRING_COUNT 24
 
 #define FX_UNICORN_V_ON  128
@@ -227,7 +242,6 @@ int main(void)
         enc_update(&enc);
         _delay_ms(2);
 
-        //leds.redraw(&leds, (void*)&(enc.count));
-        leds.redraw(&leds, 0);
+        leds.redraw(&leds, (void*)&(enc.count));
     }
 }
