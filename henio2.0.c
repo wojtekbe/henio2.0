@@ -1,6 +1,8 @@
 #include <avr/io.h>
 #include <util/delay.h>
 #include <avr/interrupt.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include "fast_hsv2rgb.h"
 
 /*
@@ -140,8 +142,11 @@ struct enc_data {
     uint8_t was; // last status
     int8_t count; // counter state
     uint8_t maxcount; // max counter val
-
     void (*on_change)(uint8_t*);
+
+    bool btn_now; // button state now
+    bool btn_last; // button state last
+    void (*on_btn)(bool pressed);
 } enc;
 
 void hsv2rgb(pix_hsv *Phsv, pix *P)
@@ -176,11 +181,12 @@ void ledring_fx_unicorn(struct ledring_data *d, void *a) //🦄
 }
 
 #define enc_rd() ((PIND>>2) & 0x3)
+#define enc_rd_button() (((PIND>>4) & 0x1) ? true : false)
 
-void enc_init(struct enc_data *d, uint8_t range, void (*f)(uint8_t*))
+void enc_init(struct enc_data *d, uint8_t range, void (*f)(uint8_t*), void (*btn_f)(bool))
 {
-    DDRD &= ~(_BV(PIND2) | _BV(PIND3));
-    PORTD |=  _BV(PIND2) | _BV(PIND3);
+    DDRD &= ~(_BV(PIND2) | _BV(PIND3) | _BV(PIND4));
+    PORTD |=  _BV(PIND2) | _BV(PIND3) | _BV(PIND4);
 
     d->was = enc_rd();
     d->is = d->was;
@@ -188,10 +194,16 @@ void enc_init(struct enc_data *d, uint8_t range, void (*f)(uint8_t*))
     d->maxcount = range;
 
     d->on_change = f;
+
+    d->btn_now = false;
+    d->btn_last = false;
+
+    d->on_btn = btn_f;
 }
 
 void enc_update(struct enc_data *d)
 {
+    // update position if changed
     d->is = enc_rd(); // A/B logic is inverted
 
     if (d->is != d->was) {
@@ -226,6 +238,14 @@ void enc_update(struct enc_data *d)
 
         d->was = d->is;
     }
+
+    // update button status if changed
+    // and call user callback
+    d->btn_now = enc_rd_button();
+    if (d->btn_now != d->btn_last) {
+        d->on_btn(d->btn_now);
+        d->btn_last = d->btn_now;
+    }
 }
 
 void on_enc_change(uint8_t *cnt)
@@ -233,15 +253,20 @@ void on_enc_change(uint8_t *cnt)
     leds.fx_hsv_count = *cnt;
 }
 
+void on_enc_button(bool state)
+{
+    leds.fx_hsv_count = state ? 5 : 10;
+}
+
 int main(void)
 {
     ledring_init(&leds, LEDRING_COUNT, ledring_fx_unicorn); // 🚦
-    enc_init(&enc, LEDRING_COUNT, on_enc_change); // 🌀
+    enc_init(&enc, LEDRING_COUNT, on_enc_change, on_enc_button); // 🌀
 
     while (1) {
         enc_update(&enc);
         _delay_ms(2);
 
-        leds.redraw(&leds, (void*)&(enc.count));
+        leds.redraw(&leds, NULL);
     }
 }
