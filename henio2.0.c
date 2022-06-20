@@ -32,7 +32,7 @@
 
 struct ledring_data {
     uint8_t ledcount;
-    void (*redraw)(struct ledring_data*, void*);
+    void (*redraw)(struct ledring_data*);
 
     uint8_t fx_last_n;
     uint8_t fx_hsv_count;
@@ -85,7 +85,7 @@ void ledring_blank(struct ledring_data *d)
     _delay_us(50);
 }
 
-void ledring_init(struct ledring_data *d, uint8_t count, void (*f)(struct ledring_data*, void*))
+void ledring_init(struct ledring_data *d, uint8_t count, void (*redraw_f)(struct ledring_data*))
 {
     DDRB |= _BV(PINB2) | _BV(PINB3) | _BV(PINB5);
     SPCR = _BV(SPE) | _BV(MSTR) | _BV(CPHA);
@@ -93,7 +93,7 @@ void ledring_init(struct ledring_data *d, uint8_t count, void (*f)(struct ledrin
     PORTB |= _BV(PINB2);
 
     d->ledcount = count;
-    d->redraw = f;
+    d->redraw = redraw_f;
 
     /* fx init */
     d->fx_last_n = 0xFF;
@@ -107,12 +107,11 @@ void ledring_init(struct ledring_data *d, uint8_t count, void (*f)(struct ledrin
     ledring_blank(d);
 }
 
-void ledring_fx_single(struct ledring_data *d, void* p)
+void ledring_fx_single(struct ledring_data *d)
 {
-    int8_t n = *((int8_t*)p);
-    if (n == d->fx_last_n) return;
-    pix P_off = { 0, 0, 1 };
-    pix P_on  = { 5, 5, 5 };
+    int8_t n = d->fx_hsv_count;
+    pix P_off = { 8, 0, 0 };
+    pix P_on  = { 128, 0, 0 };
 
     cli();
     for (int i = 0; i<(d->ledcount); i++) {
@@ -140,9 +139,7 @@ void ledring_fx_single(struct ledring_data *d, void* p)
 struct enc_data {
     uint8_t is; // current status (in gray code)
     uint8_t was; // last status
-    int8_t count; // counter state
-    uint8_t maxcount; // max counter val
-    void (*on_change)(uint8_t*);
+    void (*on_rotate)(bool up);
 
     bool btn_now; // button state now
     bool btn_last; // button state last
@@ -155,7 +152,7 @@ void hsv2rgb(pix_hsv *Phsv, pix *P)
                              &(P->R), &(P->G), &(P->B));
 }
 
-void ledring_fx_unicorn(struct ledring_data *d, void *a) //🦄
+void ledring_fx_unicorn(struct ledring_data *d) //🦄
 {
     pix P;
     uint16_t h;
@@ -180,20 +177,23 @@ void ledring_fx_unicorn(struct ledring_data *d, void *a) //🦄
     ledring_show();
 }
 
-#define enc_rd() ((PIND>>2) & 0x3)
-#define enc_rd_button() (((PIND>>4) & 0x1) ? true : false)
+void ledring_change_fx(struct ledring_data *d, void (*new_fx)(struct ledring_data*))
+{
+    d->redraw = new_fx;
+}
 
-void enc_init(struct enc_data *d, uint8_t range, void (*f)(uint8_t*), void (*btn_f)(bool))
+#define enc_rd_rotation() ((PIND>>2) & 0x3)
+#define enc_rd_button() (((PIND>>4) & 0x1) ? false : true)
+
+void enc_init(struct enc_data *d, void (*rot_f)(bool), void (*btn_f)(bool))
 {
     DDRD &= ~(_BV(PIND2) | _BV(PIND3) | _BV(PIND4));
     PORTD |=  _BV(PIND2) | _BV(PIND3) | _BV(PIND4);
 
-    d->was = enc_rd();
+    d->was = enc_rd_rotation();
     d->is = d->was;
-    d->count = 0;
-    d->maxcount = range;
 
-    d->on_change = f;
+    d->on_rotate = rot_f;
 
     d->btn_now = false;
     d->btn_last = false;
@@ -204,7 +204,7 @@ void enc_init(struct enc_data *d, uint8_t range, void (*f)(uint8_t*), void (*btn
 void enc_update(struct enc_data *d)
 {
     // update position if changed
-    d->is = enc_rd(); // A/B logic is inverted
+    d->is = enc_rd_rotation(); // A/B logic is inverted
 
     if (d->is != d->was) {
         if ((d->was==3 && d->is==2) ||
@@ -217,9 +217,7 @@ void enc_update(struct enc_data *d)
 //               '--'
 //      CODE  *3200133*
 //              ^   ^
-            d->count--;
-            if (d->count < 0) d->count = (d->maxcount-1);
-            d->on_change(&(d->count));
+            d->on_rotate(false); // rotate down
         } else
         if ((d->was==3 && d->is==1) ||
             (d->was==2 && d->is==3)) {
@@ -231,9 +229,7 @@ void enc_update(struct enc_data *d)
 //              '--'
 //      CODE  *3100233*
 //              ^   ^
-            d->count++;
-            if (d->count >= d->maxcount) d->count = 0;
-            d->on_change(&(d->count));
+            d->on_rotate(true); // rotate up
         }
 
         d->was = d->is;
@@ -248,25 +244,35 @@ void enc_update(struct enc_data *d)
     }
 }
 
-void on_enc_change(uint8_t *cnt)
+void on_enc_change(bool up)
 {
-    leds.fx_hsv_count = *cnt;
+    static int8_t cnt;
+
+    cnt = up ? cnt+1 : cnt-1;
+    if (cnt >= leds.ledcount) cnt = 0;
+    if (cnt < 0) cnt = (leds.ledcount - 1);
+
+    leds.fx_hsv_count = cnt;
 }
 
-void on_enc_button(bool state)
+void on_enc_button(bool down)
 {
-    leds.fx_hsv_count = state ? 5 : 10;
+    if (down) {
+        ledring_change_fx(&leds, ledring_fx_single);
+    } else {
+        ledring_change_fx(&leds, ledring_fx_unicorn);
+    }
 }
 
 int main(void)
 {
     ledring_init(&leds, LEDRING_COUNT, ledring_fx_unicorn); // 🚦
-    enc_init(&enc, LEDRING_COUNT, on_enc_change, on_enc_button); // 🌀
+    enc_init(&enc, on_enc_change, on_enc_button); // 🌀
 
     while (1) {
         enc_update(&enc);
         _delay_ms(2);
 
-        leds.redraw(&leds, NULL);
+        leds.redraw(&leds);
     }
 }
