@@ -25,7 +25,7 @@
 #define FX_UNICORN_V_ON  128
 #define FX_UNICORN_V_OFF   4
 #define FX_UNICORN_S     250
-#define FX_UNICORN_V_FADEOUT_STEP 2
+#define FX_UNICORN_V_FADEOUT_STEP 1
 
 #define spi_transfer(data) \
     do {SPDR=data; while(!(SPSR&(1<<SPIF)));} while(0)
@@ -140,6 +140,7 @@ struct enc_data {
     uint8_t is; // current status (in gray code)
     uint8_t was; // last status
     void (*on_rotate)(bool up);
+    int count;
 
     bool btn_now; // button state now
     bool btn_last; // button state last
@@ -194,6 +195,7 @@ void enc_init(struct enc_data *d, void (*rot_f)(bool), void (*btn_f)(bool))
     d->is = d->was;
 
     d->on_rotate = rot_f;
+    d->count = 0;
 
     d->btn_now = false;
     d->btn_last = false;
@@ -217,7 +219,10 @@ void enc_update(struct enc_data *d)
 //               '--'
 //      CODE  *3200133*
 //              ^   ^
-            d->on_rotate(false); // rotate down
+            d->count--;
+            if (d->count % 2) { // state changes twice per encoder "click"
+                d->on_rotate(false); // rotate down
+            }
         } else
         if ((d->was==3 && d->is==1) ||
             (d->was==2 && d->is==3)) {
@@ -229,7 +234,10 @@ void enc_update(struct enc_data *d)
 //              '--'
 //      CODE  *3100233*
 //              ^   ^
-            d->on_rotate(true); // rotate up
+            d->count++;
+            if (d->count % 2) { // state changes twice per encoder "click"
+                d->on_rotate(true); // rotate up
+            }
         }
 
         d->was = d->is;
