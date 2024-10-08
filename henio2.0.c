@@ -178,6 +178,24 @@ void ledring_fx_unicorn(struct ledring_data *d) //🦄
     ledring_show();
 }
 
+void ledring_fx_single_selected(struct ledring_data *d)
+{
+    pix P;
+    pix_hsv Ph;
+    int8_t n = d->fx_hsv_count;
+
+    Ph = frame_hsv[n];
+    Ph.V = FX_UNICORN_V_ON;
+
+    cli();
+    for (int i = 0; i<(d->ledcount); i++) {
+        hsv2rgb(&Ph, &P);
+        ledring_set_pix(&P);
+    }
+    sei();
+    ledring_show();
+}
+
 void ledring_change_fx(struct ledring_data *d, void (*new_fx)(struct ledring_data*))
 {
     d->redraw = new_fx;
@@ -266,7 +284,7 @@ void on_enc_change(bool up)
 void on_enc_button(bool down)
 {
     if (down) {
-        ledring_change_fx(&leds, ledring_fx_single);
+        ledring_change_fx(&leds, ledring_fx_single_selected);
     } else {
         ledring_change_fx(&leds, ledring_fx_unicorn);
     }
